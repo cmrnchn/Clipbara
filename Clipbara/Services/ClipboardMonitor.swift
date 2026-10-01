@@ -15,6 +15,12 @@ final class ClipboardMonitor {
     private var shouldSkipNextChange: Bool = false
     private var expectingScreenshot: Bool = false
     private var pollTickCount: Int = 0
+    /// Set for the duration of one capture. AppleScript domain checks spin the
+    /// main run loop, which can deliver a nested workspace notification.
+    /// Skipping that nested call leaves any newer pasteboard change unconsumed
+    /// so the next poll records it.
+    private var isCapturingPasteboard: Bool = false
+    private var deactivationObserver: NSObjectProtocol?
 
     private var sensitiveTTLSeconds: Double {
         let stored = UserDefaults.standard.double(forKey: "sensitiveTTLSeconds")
@@ -34,6 +40,7 @@ final class ClipboardMonitor {
         loadExcludedApps()
         loadSensitiveRules()
         isMonitoring = true
+        installDeactivationObserver()
 
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -45,6 +52,7 @@ final class ClipboardMonitor {
     func stop() {
         timer?.invalidate()
         timer = nil
+        removeDeactivationObserver()
         isMonitoring = false
     }
 
@@ -68,6 +76,27 @@ final class ClipboardMonitor {
             purgeExpiredSensitiveItems()
         }
 
+        capturePasteboardChange(from: NSWorkspace.shared.frontmostApplication)
+    }
+
+    /// Records a pasteboard change attributed to `sourceApp`.
+    ///
+    /// Polling alone mis-attributes copies. The timer only notices a change up
+    /// to half a second later, and by then the user has often already switched
+    /// to the app they want to paste into — the normal path for a password
+    /// copied out of a banking site or a sensitive app. That lands the secret
+    /// in plaintext history, where it is backed up and never auto-erased.
+    /// App exclusion is skipped the same way.
+    ///
+    /// `NSWorkspace.didDeactivateApplicationNotification` fires at the moment
+    /// of the switch, while the pasteboard change still belongs to the app
+    /// that just resigned. Copies with no app switch keep using the frontmost
+    /// app on the next poll.
+    private func capturePasteboardChange(from sourceApp: NSRunningApplication?) {
+        guard !isCapturingPasteboard else { return }
+        isCapturingPasteboard = true
+        defer { isCapturingPasteboard = false }
+
         let pasteboard = NSPasteboard.general
         let currentCount = pasteboard.changeCount
 
@@ -80,9 +109,7 @@ final class ClipboardMonitor {
             return
         }
 
-        // Check excluded apps
-        if let frontApp = NSWorkspace.shared.frontmostApplication,
-           let bundleId = frontApp.bundleIdentifier,
+        if let bundleId = sourceApp?.bundleIdentifier,
            excludedBundleIds.contains(bundleId) {
             expectingScreenshot = false
             return
@@ -103,7 +130,6 @@ final class ClipboardMonitor {
             return
         }
 
-        let sourceApp = NSWorkspace.shared.frontmostApplication
         let isSensitive = matchesSensitiveRule(frontApp: sourceApp)
 
         // Determine source type: screenshot if expectingScreenshot and it's an image
@@ -217,6 +243,34 @@ final class ClipboardMonitor {
                 expectingScreenshot = false
             }
         }
+    }
+
+    private func installDeactivationObserver() {
+        removeDeactivationObserver()
+        deactivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didDeactivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let self, self.isMonitoring else { return }
+                // Missing payload means we cannot attribute the copy. Leave the
+                // change for the poll, which uses the current frontmost app.
+                guard let resigned = Self.resignedApplication(in: notification) else { return }
+                self.capturePasteboardChange(from: resigned)
+            }
+        }
+    }
+
+    private func removeDeactivationObserver() {
+        if let deactivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(deactivationObserver)
+            self.deactivationObserver = nil
+        }
+    }
+
+    private static func resignedApplication(in notification: Notification) -> NSRunningApplication? {
+        notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
     }
 
     func loadExcludedApps() {
