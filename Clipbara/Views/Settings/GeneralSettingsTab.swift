@@ -110,6 +110,10 @@ struct GeneralSettingsTab: View {
         do {
             let data = try Data(contentsOf: url)
             let summary = try TransferService.importDocument(data, context: modelContext)
+            // Exclusions are cached on the monitor at launch. The settings list
+            // reads SwiftData directly, so without this reload an imported
+            // exclusion looks active while copies from that app are still saved.
+            appState.clipboardMonitor.loadExcludedApps()
             transferMessage = "Imported \(summary.importedItems) clips"
                 + (summary.skippedItems > 0 ? " (\(summary.skippedItems) duplicates skipped)" : "")
                 + (summary.importedBoards > 0 ? ", \(summary.importedBoards) pinboards" : "")

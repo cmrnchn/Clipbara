@@ -93,18 +93,15 @@ final class ClipboardMonitor {
             return
         }
 
-        let hash = SHA256.hash(data: content.rawData)
-            .compactMap { String(format: "%02x", $0) }
-            .joined()
+        let sourceApp = NSWorkspace.shared.frontmostApplication
+        let isSensitive = matchesSensitiveRule(frontApp: sourceApp)
+        let hash = contentIdentity(of: content.rawData, isSensitive: isSensitive)
 
         // Duplicate check within last 10 seconds
         if isDuplicate(hash: hash) {
             expectingScreenshot = false
             return
         }
-
-        let sourceApp = NSWorkspace.shared.frontmostApplication
-        let isSensitive = matchesSensitiveRule(frontApp: sourceApp)
 
         // Determine source type: screenshot if expectingScreenshot and it's an image
         let sourceType: SourceType = (expectingScreenshot && content.contentType == .image) ? .screenshot : .clipboard
@@ -136,20 +133,22 @@ final class ClipboardMonitor {
         refreshLatestItems()
     }
 
-    /// 히스토리 제한 초과 시 오래된 아이템 삭제 (isPinned 아이템 보존)
+    /// Drops the oldest durable clips once history exceeds the limit.
+    /// Pinned clips stay. Sensitive clips are excluded — they expire on their own.
     private func cleanupOldItems() {
         guard let modelContext, historyLimit > 0 else { return }
 
+        // Same rule as ClipboardCapturePolicy.isEvictable.
         let countDescriptor = FetchDescriptor<ClipboardItem>(
-            predicate: #Predicate { !$0.isPinned }
+            predicate: #Predicate { !$0.isPinned && !$0.isSensitive }
         )
-        let unpinnedCount = (try? modelContext.fetchCount(countDescriptor)) ?? 0
+        let evictableCount = (try? modelContext.fetchCount(countDescriptor)) ?? 0
 
-        guard unpinnedCount > historyLimit else { return }
+        guard evictableCount > historyLimit else { return }
 
-        let deleteCount = unpinnedCount - historyLimit
+        let deleteCount = evictableCount - historyLimit
         var fetchDescriptor = FetchDescriptor<ClipboardItem>(
-            predicate: #Predicate { !$0.isPinned },
+            predicate: #Predicate { !$0.isPinned && !$0.isSensitive },
             sortBy: [SortDescriptor(\.copiedAt, order: .forward)]
         )
         fetchDescriptor.fetchLimit = deleteCount
@@ -170,6 +169,17 @@ final class ClipboardMonitor {
             modelContext.delete(item)
         }
         try? modelContext.save()
+    }
+
+    private func contentIdentity(of data: Data, isSensitive: Bool) -> String {
+        switch ClipboardCapturePolicy.identityAlgorithm(isSensitive: isSensitive) {
+        case .sha256:
+            return SHA256.hash(data: data)
+                .map { String(format: "%02x", $0) }
+                .joined()
+        case .keyedMac:
+            return SensitiveEncryptionService.fingerprint(of: data)
+        }
     }
 
     private func isDuplicate(hash: String) -> Bool {
