@@ -97,24 +97,29 @@ final class ClipboardItem {
             provider = NSItemProvider(object: (plainText ?? "") as NSString)
 
         case .image:
-            if let image = NSImage(data: plainData),
-               let tiff = image.tiffRepresentation,
-               let bitmap = NSBitmapImageRep(data: tiff),
-               let pngData = bitmap.representation(using: .png, properties: [:]) {
-                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Clipbara", isDirectory: true)
-                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                let asciiOnly = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_")
-                let safeName = sourceAppName?
-                    .unicodeScalars.filter { asciiOnly.contains($0) }
-                    .reduce(into: "") { $0.append(String($1)) }
-                    .trimmingCharacters(in: .whitespaces)
-                let appName = (safeName?.isEmpty ?? true) ? "Clipbara" : safeName!
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
-                let filename = "\(appName) \(formatter.string(from: copiedAt)).png"
-                let fileURL = dir.appendingPathComponent(filename)
-                try? pngData.write(to: fileURL)
-                provider = NSItemProvider(contentsOf: fileURL) ?? NSItemProvider(object: image)
+            if let image = NSImage(data: plainData) {
+                if !CaptureSafety.shouldWritePlaintextImageFile(isSensitive: isSensitive) {
+                    provider = NSItemProvider(object: image)
+                } else if let tiff = image.tiffRepresentation,
+                          let bitmap = NSBitmapImageRep(data: tiff),
+                          let pngData = bitmap.representation(using: .png, properties: [:]) {
+                    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Clipbara", isDirectory: true)
+                    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    let asciiOnly = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_")
+                    let safeName = sourceAppName?
+                        .unicodeScalars.filter { asciiOnly.contains($0) }
+                        .reduce(into: "") { $0.append(String($1)) }
+                        .trimmingCharacters(in: .whitespaces)
+                    let appName = (safeName?.isEmpty ?? true) ? "Clipbara" : safeName!
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+                    let filename = "\(appName) \(formatter.string(from: copiedAt)).png"
+                    let fileURL = dir.appendingPathComponent(filename)
+                    try? pngData.write(to: fileURL)
+                    provider = NSItemProvider(contentsOf: fileURL) ?? NSItemProvider(object: image)
+                } else {
+                    provider = NSItemProvider(object: image)
+                }
             } else {
                 provider = NSItemProvider()
             }

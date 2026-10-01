@@ -80,15 +80,22 @@ final class ClipboardMonitor {
             return
         }
 
-        // Check excluded apps
-        if let frontApp = NSWorkspace.shared.frontmostApplication,
-           let bundleId = frontApp.bundleIdentifier,
-           excludedBundleIds.contains(bundleId) {
+        guard let content = classifier.classify(pasteboard) else {
             expectingScreenshot = false
             return
         }
 
-        guard let content = classifier.classify(pasteboard) else {
+        // Excluded apps are not recorded. An explicit screenshot is classified
+        // first so it can be kept: the shot lands after the user is back in the
+        // app they captured, which is often the excluded one.
+        let keepScreenshot = CaptureSafety.shouldRecordDespiteExclusion(
+            expectingScreenshot: expectingScreenshot,
+            isImage: content.contentType == .image
+        )
+        if !keepScreenshot,
+           let frontApp = NSWorkspace.shared.frontmostApplication,
+           let bundleId = frontApp.bundleIdentifier,
+           excludedBundleIds.contains(bundleId) {
             expectingScreenshot = false
             return
         }

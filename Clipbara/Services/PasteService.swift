@@ -65,8 +65,12 @@ struct PasteService {
                 break
             }
 
-            // 임시 PNG 파일 저장 — 터미널 앱(Ghostty 등)이 파일 경로로 이미지를 전달
-            let tempURL = Self.writeTempPNG(pngData, sourceApp: item.sourceAppName)
+            // Temp PNG so file-oriented apps (Ghostty) can paste the image.
+            // Sensitive images stay on the pasteboard as PNG/TIFF only — a
+            // plaintext file would remain after the history item auto-erases.
+            let tempURL = CaptureSafety.shouldWritePlaintextImageFile(isSensitive: item.isSensitive)
+                ? Self.writeTempPNG(pngData, sourceApp: item.sourceAppName)
+                : nil
 
             // NSURL writeObjects로 파일 URL을 먼저 쓴 뒤 PNG/TIFF 추가
             // — Ghostty가 이미지 파일로 인식하려면 이 순서가 필요
