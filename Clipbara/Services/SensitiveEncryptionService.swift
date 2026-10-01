@@ -21,6 +21,14 @@ enum SensitiveEncryptionService {
         return try? ChaChaPoly.open(box, using: key())
     }
 
+    /// Duplicate-detection identity for a sensitive clip. HMAC-SHA256 under the
+    /// keychain key, so the stored hash is not an offline oracle for the plaintext.
+    static func fingerprint(of data: Data) -> String {
+        HMAC<SHA256>.authenticationCode(for: data, using: key())
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
     private static func key() -> SymmetricKey {
         keyLock.lock()
         defer { keyLock.unlock() }
