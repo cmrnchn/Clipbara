@@ -6,13 +6,12 @@ import CryptoKit
 @Observable
 final class ClipboardMonitor {
     private var timer: Timer?
-    private var lastChangeCount: Int = 0
     private let classifier = ContentTypeClassifier()
     private let screenshotManager = ScreenshotManager()
     private var modelContext: ModelContext?
     private var excludedBundleIds: Set<String> = []
     private var sensitiveRules: [SensitiveRule] = []
-    private var shouldSkipNextChange: Bool = false
+    private var changeTracker = PasteboardChangeTracker(changeCount: 0)
     private var expectingScreenshot: Bool = false
     private var pollTickCount: Int = 0
 
@@ -30,7 +29,7 @@ final class ClipboardMonitor {
 
     func start(modelContext: ModelContext) {
         self.modelContext = modelContext
-        lastChangeCount = NSPasteboard.general.changeCount
+        changeTracker = PasteboardChangeTracker(changeCount: NSPasteboard.general.changeCount)
         loadExcludedApps()
         loadSensitiveRules()
         isMonitoring = true
@@ -71,14 +70,9 @@ final class ClipboardMonitor {
         let pasteboard = NSPasteboard.general
         let currentCount = pasteboard.changeCount
 
-        guard currentCount != lastChangeCount else { return }
-        lastChangeCount = currentCount
-
-        if shouldSkipNextChange {
-            shouldSkipNextChange = false
-            expectingScreenshot = false
-            return
-        }
+        // Our own paste already advanced `changeTracker` to the post-write
+        // count. A copy made after that still changes the count and is kept.
+        guard changeTracker.consume(currentCount) else { return }
 
         // Check excluded apps
         if let frontApp = NSWorkspace.shared.frontmostApplication,
@@ -203,8 +197,10 @@ final class ClipboardMonitor {
         return pngData
     }
 
-    func skipNextChange() {
-        shouldSkipNextChange = true
+    /// Ignore the pasteboard generation this process just wrote. Call immediately
+    /// after the write, on the main thread, so a later user copy is still recorded.
+    func noteOwnPasteboardWrite() {
+        changeTracker.noteOwnWrite(changeCount: NSPasteboard.general.changeCount)
     }
 
     func captureScreenshot() {

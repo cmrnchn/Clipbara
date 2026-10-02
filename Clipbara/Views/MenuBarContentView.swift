@@ -106,7 +106,6 @@ struct MenuBarThumbnailTile: View {
 
     var body: some View {
         Button {
-            appState.clipboardMonitor.skipNextChange()
             appState.pasteService.paste(item: item)
         } label: {
             ZStack(alignment: .bottomLeading) {

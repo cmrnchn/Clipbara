@@ -8,6 +8,11 @@ struct PasteService {
     /// Backing key for the "Always Paste as Plain Text" setting (Settings > General).
     nonisolated static let alwaysPlainTextDefaultsKey = "alwaysPastePlainText"
 
+    /// Called after this service mutates the general pasteboard, before control
+    /// returns to the run loop. Callers use it to ignore that write without
+    /// discarding a copy the user makes before the next clipboard poll.
+    var onDidWritePasteboard: (() -> Void)?
+
     /// Called after every successful paste so callers (AppState) can erase sensitive
     /// items immediately when "erase after first paste" is enabled.
     var onDidPaste: ((ClipboardItem) -> Void)?
@@ -33,8 +38,8 @@ struct PasteService {
     /// - Parameter asPlainText: `nil` resolves from the setting combined with the Shift modifier.
     func paste(item: ClipboardItem, asPlainText: Bool? = nil) {
         if asPlainText ?? Self.resolvePlainText(), Self.supportsPlainText(item) {
-            pastePlainText(item: item)
-            onDidPaste?(item)
+            guard pastePlainText(item: item) else { return }
+            didWritePasteboard(item)
             return
         }
 
@@ -100,14 +105,23 @@ struct PasteService {
             pasteboard.setData(data, forType: .string)
         }
 
-        onDidPaste?(item)
+        didWritePasteboard(item)
     }
 
-    func pastePlainText(item: ClipboardItem) {
-        guard let text = item.decryptedTextContent() else { return }
+    /// Writes plain text. Returns false when there is nothing to put on the pasteboard,
+    /// so callers do not treat a no-op as a successful paste.
+    @discardableResult
+    func pastePlainText(item: ClipboardItem) -> Bool {
+        guard let text = item.decryptedTextContent() else { return false }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        return true
+    }
+
+    private func didWritePasteboard(_ item: ClipboardItem) {
+        onDidWritePasteboard?()
+        onDidPaste?(item)
     }
 
     /// 오래된 임시 파일 정리 (1시간 이상)
