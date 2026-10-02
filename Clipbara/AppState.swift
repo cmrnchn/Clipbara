@@ -32,6 +32,9 @@ final class AppState {
     func start(modelContext: ModelContext, modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
         clipboardMonitor.start(modelContext: modelContext)
+        pasteService.onDidWritePasteboard = { [weak self] in
+            self?.clipboardMonitor.noteOwnPasteboardWrite()
+        }
         pasteService.onDidPaste = { [weak self] item in
             guard item.isSensitive else { return }
             let eraseOnPaste = UserDefaults.standard.object(forKey: "sensitiveEraseOnPaste") as? Bool ?? true
@@ -78,7 +81,6 @@ final class AppState {
     /// Shared paste path for panel and pinboard cards.
     /// - Parameter asPlainText: `nil` resolves from the setting combined with the Shift modifier.
     func paste(_ item: ClipboardItem, asPlainText: Bool? = nil) {
-        clipboardMonitor.skipNextChange()
         pasteService.paste(item: item, asPlainText: asPlainText)
         hidePanel()
     }

@@ -500,7 +500,6 @@ final class PanelController {
 
         case 36: // Return - paste
             if let item = quickLookItem {
-                appState.clipboardMonitor.skipNextChange()
                 appState.pasteService.paste(item: item)
                 appState.hidePanel()
                 return true
@@ -509,7 +508,6 @@ final class PanelController {
             guard let idx = appState.searchState.selectedIndex,
                   idx < items.count else { return false }
             let item = items[idx]
-            appState.clipboardMonitor.skipNextChange()
             appState.pasteService.paste(item: item)
             appState.hidePanel()
             return true
@@ -548,7 +546,6 @@ final class PanelController {
                 },
                 onPaste: { [weak self, weak appState] in
                     guard let self, let appState else { return }
-                    appState.clipboardMonitor.skipNextChange()
                     appState.pasteService.paste(item: item)
                     self.hidePanel()
                 }

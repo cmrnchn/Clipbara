@@ -49,8 +49,8 @@ Clipbara/
 ### Swift 6 Strict Concurrency
 This project uses `SWIFT_STRICT_CONCURRENCY: complete`. All UI-related code must be annotated with `@MainActor`. Use `@Observable` for observable classes.
 
-### `skipNextChange` Pattern
-When programmatically writing to the clipboard via `PasteService`, you **must** call `ClipboardMonitor.skipNextChange()` beforehand. This prevents the monitor from re-capturing the item that was just pasted.
+### Ignoring our own pasteboard writes
+`PasteService` calls `onDidWritePasteboard` immediately after it mutates the general pasteboard. `AppState` uses that to call `ClipboardMonitor.noteOwnPasteboardWrite()`, which records the post-write `changeCount`. Do not skip the next poll with a boolean: a copy the user makes before that poll is a newer `changeCount` and must still be stored.
 
 ### NSPanel + NSHostingView
 The clipboard panel uses a non-activating `NSPanel` to avoid stealing focus from the frontmost app. SwiftUI views are hosted via `NSHostingView`.

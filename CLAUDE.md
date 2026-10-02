@@ -53,7 +53,7 @@
 - macOS 14+ 타겟
 - SwiftData 사용 (`#Index`, `#Unique`는 macOS 15 전용이므로 사용 금지)
 - KeyboardShortcuts, Sparkle SPM 의존성
-- `skipNextChange` 패턴: PasteService 호출 전 ClipboardMonitor.skipNextChange() 필수
+- 클립보드 기록 무시: `PasteService`가 페이스트보드를 쓴 직후 `onDidWritePasteboard`에서 `ClipboardMonitor.noteOwnPasteboardWrite()`를 호출한다. 폴링 전에 플래그를 세워 다음 변경을 통째로 버리면, 붙여넣은 직후 사용자가 복사한 내용이 히스토리에서 사라진다
 - NSPanel(nonactivatingPanel) + NSHostingView로 SwiftUI 호스팅
 - **SwiftData 저장 규칙**: 데이터 변경(insert/delete/update) 후 반드시 `try? modelContext.save()` 호출. autosave에 의존하지 말 것
 - **뷰 lifecycle 주의**: NSHostingView 내에서 `@Query`를 가진 뷰를 if/else로 조건부 표시하면 파괴/재생성 시 @Query 동기화가 깨질 수 있음. ZStack + opacity 패턴 사용
