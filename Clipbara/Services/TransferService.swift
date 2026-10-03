@@ -126,14 +126,22 @@ enum TransferService {
 
         var summary = ImportSummary()
 
-        // Items (dedupe by contentHash)
+        // Items (dedupe by contentHash). Sensitive rows are not reuse targets:
+        // they auto-erase and delete any pinboard entry attached to them.
         let existingItems = try context.fetch(FetchDescriptor<ClipboardItem>())
         var itemsByHash: [String: ClipboardItem] = [:]
-        for item in existingItems { itemsByHash[item.contentHash] = item }
+        for item in existingItems where BackupMergePolicy.canReuseExistingItem(isSensitive: item.isSensitive) {
+            itemsByHash[item.contentHash] = item
+        }
 
         var itemByExportID: [UUID: ClipboardItem] = [:]
         for record in doc.items {
             if let existing = itemsByHash[record.contentHash] {
+                existing.isPinned = BackupMergePolicy.shouldPin(
+                    wasPinned: existing.isPinned,
+                    backupSaysPinned: record.isPinned,
+                    placedOnBoard: false
+                )
                 itemByExportID[record.id] = existing
                 summary.skippedItems += 1
                 continue
@@ -179,6 +187,14 @@ enum TransferService {
         for record in doc.entries {
             guard let board = boardByExportID[record.pinboardID],
                   let item = itemByExportID[record.itemID] else { continue }
+            // Eviction only keeps `isPinned` clips, and it removes their board
+            // entries. A merged entry has to pin the clip or the next capture
+            // deletes the imported pin.
+            item.isPinned = BackupMergePolicy.shouldPin(
+                wasPinned: item.isPinned,
+                backupSaysPinned: false,
+                placedOnBoard: true
+            )
             let alreadyLinked = board.entries.contains { $0.clipboardItem?.contentHash == item.contentHash }
             if alreadyLinked { continue }
             let entry = PinboardEntry(clipboardItem: item, pinboard: board, displayOrder: record.displayOrder)
