@@ -16,27 +16,91 @@ struct ClipbaraApp: App {
         ])
 
         let storeURL = StoreManager.resolveStoreURL()
-        StoreManager.backupStore(at: storeURL)
-
         let config = ModelConfiguration(url: storeURL)
 
-        // 1차: 정상 오픈
-        do {
-            return try ModelContainer(for: schema, configurations: [config])
-        } catch {
-            StoreManager.logger.error("Failed to open store: \(error.localizedDescription)")
+        func openStore() throws -> ModelContainer {
+            try ModelContainer(for: schema, configurations: [config])
         }
 
-        // 2차: 손상된 store 삭제 후 재시도 (백업은 이미 존재)
-        StoreManager.deleteStore(at: storeURL)
-        do {
-            return try ModelContainer(for: schema, configurations: [config])
-        } catch {
-            StoreManager.logger.error("Recovery failed: \(error.localizedDescription)")
+        func recoverStore(_ open: () throws -> ModelContainer) -> ModelContainer? {
+            if StoreManager.restoreBackup(at: storeURL) {
+                do {
+                    return try open()
+                } catch {
+                    StoreManager.logger.error("Restored backup failed to open: \(error.localizedDescription)")
+                }
+            }
+
+            // Keep the unopenable files. The next successful launch snapshots
+            // whatever new store we create below and must not overwrite the only
+            // remaining copy of the old database.
+            _ = StoreManager.archiveUnopenedFiles(at: storeURL)
+            do {
+                return try open()
+            } catch {
+                StoreManager.logger.error("Recovery failed: \(error.localizedDescription)")
+                return nil
+            }
         }
 
-        // 3차: in-memory 폴백 (앱은 실행되지만 데이터 비영속)
+        // The backup is the last database that successfully opened. Snapshot the
+        // closed files first, but replace that backup only after this open
+        // succeeds. Doing it the other way copied an unopenable store over the
+        // last good backup and then deleted the store, so history came back empty.
+        switch StoreManager.captureSnapshot(at: storeURL) {
+        case .noStore:
+            do {
+                return try openStore()
+            } catch {
+                StoreManager.logger.error("Failed to create store: \(error.localizedDescription)")
+            }
+
+        case .captureFailed:
+            StoreManager.logger.error("Could not snapshot the clipboard store; the previous backup was left untouched")
+            if let container = try? openStore() {
+                return container
+            }
+            if let container = recoverStore(openStore) {
+                return container
+            }
+
+        case .captured(let staging):
+            do {
+                let container = try openStore()
+                if !StoreManager.commitSnapshot(staging, for: storeURL) {
+                    StoreManager.logger.error("Clipboard store opened but the backup could not be updated")
+                }
+                return container
+            } catch {
+                StoreManager.logger.error("Failed to open store: \(error.localizedDescription)")
+            }
+
+            if let container = try? openStore() {
+                if !StoreManager.commitSnapshot(staging, for: storeURL) {
+                    StoreManager.logger.error("Clipboard store opened but the backup could not be updated")
+                }
+                return container
+            }
+
+            // Prefer the closed snapshot over the older backup. It still has the
+            // clips from the last session if this open is what damaged the file.
+            if StoreManager.restoreSnapshot(staging, over: storeURL),
+               let container = try? openStore() {
+                if !StoreManager.commitSnapshot(staging, for: storeURL) {
+                    StoreManager.logger.error("Clipboard store opened but the backup could not be updated")
+                }
+                return container
+            }
+
+            StoreManager.discardSnapshot(staging)
+            if let container = recoverStore(openStore) {
+                return container
+            }
+        }
+
+        // In-memory fallback. History is not persisted for this launch.
         do {
+            StoreManager.logger.error("Starting with an in-memory clipboard store")
             return try ModelContainer(for: schema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
         } catch {
             fatalError("Cannot create any ModelContainer: \(error)")
