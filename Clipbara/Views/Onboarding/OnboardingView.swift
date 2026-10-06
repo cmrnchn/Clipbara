@@ -13,6 +13,7 @@ struct OnboardingView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(AppState.self) private var appState
     @State private var step = 0
     @State private var panelShortcutRefresh = 0
     @State private var transferMessage = ""
@@ -451,9 +452,11 @@ struct OnboardingView: View {
         do {
             let data = try Data(contentsOf: url)
             let summary = try TransferService.importDocument(data, context: modelContext)
+            appState.clipboardMonitor.loadSensitiveRules()
             transferMessage = "Imported \(summary.importedItems) clips"
                 + (summary.skippedItems > 0 ? " (\(summary.skippedItems) duplicates skipped)" : "")
                 + (summary.importedBoards > 0 ? ", \(summary.importedBoards) pinboards" : "")
+                + (summary.importedSensitiveRules > 0 ? ", \(summary.importedSensitiveRules) sensitive rules" : "")
                 + "."
         } catch {
             transferMessage = "Import failed: \(error.localizedDescription)"

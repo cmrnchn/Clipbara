@@ -43,6 +43,8 @@ struct TransferDocument: Codable {
     var pinboards: [Board]
     var entries: [Entry]
     var exclusions: [Exclusion]
+    /// Absent on backups written before sensitive rules were included.
+    var sensitiveRules: [SensitiveRuleBackup]?
 }
 
 @MainActor
@@ -54,6 +56,7 @@ enum TransferService {
         var importedBoards = 0
         var importedEntries = 0
         var importedExclusions = 0
+        var importedSensitiveRules = 0
     }
 
     // MARK: - Export
@@ -64,6 +67,7 @@ enum TransferService {
         let items = try context.fetch(FetchDescriptor<ClipboardItem>()).filter { !$0.isSensitive }
         let boards = try context.fetch(FetchDescriptor<Pinboard>())
         let exclusions = try context.fetch(FetchDescriptor<ExcludedApp>())
+        let sensitiveRules = try context.fetch(FetchDescriptor<SensitiveRule>())
 
         var entryRecords: [TransferDocument.Entry] = []
         for board in boards {
@@ -107,6 +111,9 @@ enum TransferService {
             entries: entryRecords,
             exclusions: exclusions.map { exclusion in
                 TransferDocument.Exclusion(bundleId: exclusion.bundleId, appName: exclusion.appName)
+            },
+            sensitiveRules: sensitiveRules.map { rule in
+                SensitiveRuleBackup(kind: rule.kindRaw, pattern: rule.pattern, displayName: rule.displayName)
             }
         )
 
@@ -118,7 +125,8 @@ enum TransferService {
     // MARK: - Import
 
     /// Merges a backup into the current store. Items are deduplicated by
-    /// content hash, pinboards by name, exclusions by bundle identifier.
+    /// content hash, pinboards by name, exclusions by bundle identifier,
+    /// and sensitive rules by kind and pattern.
     static func importDocument(_ data: Data, context: ModelContext) throws -> ImportSummary {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -195,6 +203,20 @@ enum TransferService {
             context.insert(ExcludedApp(bundleId: record.bundleId, appName: record.appName))
             excludedIDs.insert(record.bundleId)
             summary.importedExclusions += 1
+        }
+
+        // Match patterns only. Sensitive clip payloads stay out of the backup.
+        let existingRules = try context.fetch(FetchDescriptor<SensitiveRule>())
+        let rulesToImport = SensitiveRuleBackupMerge.rulesToImport(
+            existing: existingRules.map { rule in
+                SensitiveRuleBackup(kind: rule.kindRaw, pattern: rule.pattern, displayName: rule.displayName)
+            },
+            incoming: doc.sensitiveRules ?? []
+        )
+        for record in rulesToImport {
+            guard let kind = SensitiveRuleKind(rawValue: record.kind) else { continue }
+            context.insert(SensitiveRule(kind: kind, pattern: record.pattern, displayName: record.displayName))
+            summary.importedSensitiveRules += 1
         }
 
         try context.save()

@@ -110,9 +110,14 @@ struct GeneralSettingsTab: View {
         do {
             let data = try Data(contentsOf: url)
             let summary = try TransferService.importDocument(data, context: modelContext)
+            // Rules are cached on the monitor at launch. Without this reload an
+            // imported password-manager rule is visible in Settings while copies
+            // from that app are still stored in plaintext.
+            appState.clipboardMonitor.loadSensitiveRules()
             transferMessage = "Imported \(summary.importedItems) clips"
                 + (summary.skippedItems > 0 ? " (\(summary.skippedItems) duplicates skipped)" : "")
                 + (summary.importedBoards > 0 ? ", \(summary.importedBoards) pinboards" : "")
+                + (summary.importedSensitiveRules > 0 ? ", \(summary.importedSensitiveRules) sensitive rules" : "")
                 + "."
         } catch {
             transferMessage = "Import failed: \(error.localizedDescription)"
